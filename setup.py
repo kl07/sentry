@@ -106,6 +106,7 @@ install_requires = [
     'kombu<3.0.27',  # 3.0.27 breaks Django 1.6.x compatibility
     'lxml>=3.4.1',
     'mock>=0.8.0,<1.1',
+    'mmh3>=2.3.1',
     'petname>=1.7,<1.8',
     'progressbar>=2.2,<2.4',
     'psycopg2>=2.5.0,<2.6.0',

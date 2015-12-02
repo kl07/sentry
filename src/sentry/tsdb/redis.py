@@ -10,6 +10,7 @@ from __future__ import absolute_import
 import logging
 import six
 
+import mmh3
 from binascii import crc32
 from collections import defaultdict
 from datetime import timedelta
@@ -21,12 +22,32 @@ from sentry.tsdb.base import BaseTSDB
 from sentry.utils.dates import to_timestamp
 from sentry.utils.redis import (
     check_cluster_versions,
+    load_script,
     make_rb_cluster,
 )
 from sentry.utils.versioning import Version
 
 
 logger = logging.getLogger(__name__)
+
+
+class CountMinSketch(object):
+    __increment = staticmethod(load_script('tsdb/cmsketch/increment.lua'))
+    __estimate = staticmethod(load_script('tsdb/cmsketch/estimate.lua'))
+
+    def __init__(self, depth=5, width=32, hash=mmh3.hash):
+        self.depth = depth
+        self.width = width
+        self.hash = hash
+
+    def get_buckets(self, value):
+        return ['{:x}'.format(self.hash(value, i) % self.width) for i in xrange(0, self.depth)]
+
+    def increment(self, client, key, value, count=1):
+        return self.__increment(client, (key,), [count] + self.get_buckets(value))
+
+    def estimate(self, client, key, value):
+        return self.__estimate(client, (key,), self.get_buckets(value))
 
 
 class RedisTSDB(BaseTSDB):
