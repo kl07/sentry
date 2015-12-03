@@ -12,7 +12,10 @@ import six
 
 import mmh3
 from binascii import crc32
-from collections import defaultdict
+from collections import (
+    defaultdict,
+    namedtuple,
+)
 from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
@@ -35,19 +38,31 @@ class CountMinSketch(object):
     __increment = staticmethod(load_script('tsdb/cmsketch/increment.lua'))
     __estimate = staticmethod(load_script('tsdb/cmsketch/estimate.lua'))
 
-    def __init__(self, depth=5, width=32, hash=mmh3.hash):
+    Keys = namedtuple('Keys', 'sketch index')
+
+    def __init__(self, index=100, depth=5, width=32, hash=mmh3.hash):
+        self.index = index
         self.depth = depth
         self.width = width
         self.hash = hash
+
+    def get_keys(self, prefix):
+        return self.Keys('{}:s'.format(prefix), '{}:i'.format(prefix))
 
     def get_buckets(self, value):
         return ['{:x}'.format(self.hash(value, i) % self.width) for i in xrange(0, self.depth)]
 
     def increment(self, client, key, value, count=1):
-        return self.__increment(client, (key,), [count] + self.get_buckets(value))
+        return self.__increment(client, self.get_keys(key), [self.index, value, count] + self.get_buckets(value))
 
-    def estimate(self, client, key, value):
-        return self.__estimate(client, (key,), self.get_buckets(value))
+    def frequency(self, client, key, value):
+        return self.__estimate(client, self.get_keys(key), [self.index, value] + self.get_buckets(value))
+
+    def ranked(self, client, key, limit=None):
+        if limit is None:
+            limit = self.index
+        assert not (limit > self.index) and limit > 0
+        return client.zrevrange(self.get_keys(key).index, 0, limit - 1, withscores=True)
 
 
 class RedisTSDB(BaseTSDB):
